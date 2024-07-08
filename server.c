@@ -6,13 +6,19 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <pthread.h>
-typedef struct sockinfo{
+#include "threadPool.h"
+typedef struct Sockinfo{
     struct sockaddr_in addr;
     int cfd;
-}sockinfo;
-sockinfo infos[512];
+}Sockinfo;
+Sockinfo infos[512];
 
-void *working(void *arg);
+typedef struct Poolinfo{
+    ThreadPool *pool;
+    int fd;
+}Poolinfo;
+void working(void *arg);
+void acceptConnect(void *arg);
 
 int main() {
     //1.监听
@@ -45,33 +51,35 @@ int main() {
         bzero(&infos, sizeof(infos[i]));
         infos[i].cfd = -1;
     }
-
-
+    ThreadPool *pool = threadPoolCreate(3,10,100);
+    Poolinfo* poolinfo = (Poolinfo*) malloc(sizeof(Poolinfo));
+    poolinfo->pool = pool;
+    poolinfo->fd = fd;
+    threadPoolAdd(pool, acceptConnect, poolinfo);
+    pthread_exit(NULL);
+    return 0;
+}
+void acceptConnect(void *arg){
     int addrlen = sizeof(struct sockaddr_in);
+    Poolinfo* pPoolinfo = (Poolinfo*)arg;
     while (1) {
-        sockinfo* infoPtr;
-        for (int i = 0; i < max; ++i) {
-            if(infos[i].cfd == -1){
-                infoPtr = &infos[i];
-                break;
-            }
-        }
-        int cfd = accept(fd, (struct sockaddr *) &infoPtr->addr, &addrlen);
-        infoPtr->cfd = cfd;
-        if (cfd == -1) {
+        Sockinfo* pSockinfo;
+        pSockinfo =(Sockinfo*) malloc(sizeof(Sockinfo));
+        pSockinfo->cfd = accept(pPoolinfo->fd, (struct sockaddr *) &pSockinfo->addr, &addrlen);
+
+        if (pSockinfo->cfd == -1) {
             perror("accept");
             break;
         }
-        pthread_t tid;
-        pthread_create(&tid, NULL, working, infoPtr);
-        pthread_detach(tid);
+        threadPoolAdd(pPoolinfo->pool, working, pSockinfo);
     }
-    close(fd);
-    return 0;
+    close(pPoolinfo->fd);
+
 }
-void *working(void *arg) {
+
+void working(void *arg) {
         char ip[32];
-        sockinfo* infoPtr = (sockinfo*)arg;
+        Sockinfo* infoPtr = (Sockinfo*)arg;
         printf("客户端的IP:%s, 端口：%d\n",
                inet_ntop(AF_INET, &infoPtr->addr.sin_addr.s_addr, ip, sizeof(ip)),
                ntohs(infoPtr->addr.sin_port));
@@ -93,5 +101,5 @@ void *working(void *arg) {
 
         close(infoPtr->cfd);
         infoPtr->cfd = -1;
-        return NULL;
+
     }
